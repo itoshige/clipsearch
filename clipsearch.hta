@@ -1,0 +1,252 @@
+<html>
+<head>
+	<title>cllipsearch</title>
+	<HTA:APPLICATION
+		APPLICATIONNAME="cllipsearch"
+		ID="thisHTA"
+		MAXIMIZEBUTTON="no"
+		MINIMIZEBUTTON="no"
+		SCROLLFLAT="yes"
+		WINDOWSTATE="maximize"
+	/>
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+	
+	<script type="text/javascript">
+		var INI_FILE  = 'position.ini';
+		var SHELL_APP = new ActiveXObject( "Shell.Application" );
+		var WSHELL = new ActiveXObject( "WScript.Shell" );
+		var currentPath = WSHELL.CurrentDirectory;
+		var CLIPDB_FILE = currentPath + '\\' + 'clipsearchDB.xls';
+		var FILE_OBJ = new ActiveXObject( "Scripting.FileSystemObject" );
+		
+		var ClipsModel = function(cliparr) {
+			this.cliparr = cliparr;
+		}
+		
+		ClipsModel.prototype.getArr = function() {
+			return this.cliparr;
+		}
+		
+		ClipsModel.prototype.unshift = function(clip) {
+			this.cliparr.unshift(clip);
+		}
+		
+		ClipsModel.prototype.exist = function(clip) {
+			var arrTable = this.cliparr.reduce(function(m, a, i) {
+				  m[a] = (m[a] || []).concat(i);
+				  return m;
+				}, {});
+			if(clip in arrTable) {
+			  return true;
+			}
+		}
+		
+		var CLIP = new ClipsModel(getClipArr());
+		var currentClipVal = window.clipboardData.getData("Text");
+		init();		
+
+		function init() {
+			resize();
+			window.onresize = resize;
+			checkDBFile();
+			
+			Element.prototype.prependChild = function(el) {
+				this.insertBefore(el, this.firstChild);
+			}
+
+			regular();
+		}
+		
+		function resize() {
+			var width = 400;
+			var height = 500;
+			
+			window.resizeTo(width, height); // window size
+			window.moveTo(                  // middle on window
+				(window.screen.width - width) / 2,
+				(window.screen.height - height) / 2
+			);
+		}
+		
+		function regular() {
+			addClipSearchDB();
+			window.setTimeout("regular()", 1000);
+		}
+		
+		function addClipSearchDB() {
+			var newClipVal = window.clipboardData.getData("Text");
+			if(newClipVal != undefined && !CLIP.exist(newClipVal) && currentClipVal != newClipVal) {
+				excel(function(book) {
+					var a1 = book.Worksheets( 1 ).Range('A1');
+					a1.Insert();
+					a1 = book.Worksheets( 1 ).Range('A1');
+					a1.value = newClipVal;
+				});
+				currentClipVal = newClipVal;
+				addDisplayClips(newClipVal);
+			}
+		}
+		
+		function addDisplayClips(text) {
+			CLIP.unshift(text);
+			
+			var target = document.getElementById("targetwd").value.toLowerCase();
+			if(target) {
+				if(text.toLowerCase().indexOf(target) === -1) return;
+			}
+			var newClip = createClipHtml(text);
+			document.getElementById('clips').prependChild(newClip);
+		}
+		
+		function displayClips(arr) {
+			var docFragm = document.createDocumentFragment();
+			for(var i=0; i<arr.length; i++) {
+				docFragm.appendChild(createClipHtml(arr[i]));
+			}
+			var clips = document.getElementById('clips');
+			clips.innerHTML = "";
+			clips.appendChild(docFragm);
+		}
+		
+		function createClipHtml(text) {
+			var a = document.createElement('a');
+			var newClip = document.createElement('li');
+			
+			var val = text;
+			if(text.length > 51) val = text.substr(0, 50) + '...';
+			a.textContent = val;
+			a.setAttribute('href', '#');
+			
+			newClip.appendChild(a);
+			a.onclick = function() {
+				window.clipboardData.setData("Text", text);
+				WSHELL.SendKeys("%({ESC})");
+			}
+
+			return newClip;
+		}
+		
+		function getClipArr() {
+			return excel(function(book) {
+				var sheet = book.Worksheets( 1 );
+				
+				var i=1;
+				var clipdata = [];
+				while(true) {
+					var range = 'A' + i;
+					var val = sheet.Range(range).Value;
+					if(val == undefined || val.trim() == '') break;
+					i++;
+					clipdata.push(val);
+				}
+				return clipdata;
+			});
+		}
+		
+		function excel(func) {
+			var excelApp = new ActiveXObject( "Excel.Application" );
+			excelApp.Visible = false;
+			
+			var currentPath = WSHELL.CurrentDirectory;
+			var book = excelApp.Workbooks.Open( CLIPDB_FILE );
+			var result = func(book);
+			book.Close(true);
+			excelApp.Quit();
+			excelApp = null;
+			return result;
+		}
+		
+		function checkDBFile() {
+			if(!FILE_OBJ.FileExists(CLIPDB_FILE)) {
+				alert(CLIPDB_FILE + " doesn't exist.");
+			}
+		}
+		
+		window.onload = function() {
+			displayClips(CLIP.getArr());
+		}
+		
+		window.onfocus = function() {
+			document.getElementById("targetwd").focus();
+			moveWindow(INI_FILE);
+		}
+		
+		window.onblur  = function() {
+			writeWindowPos(INI_FILE);
+		}
+		
+		function moveWindow(ini) {
+			var FORREADING      = 1; // read only
+			var TRISTATE_FALSE  = 0; // ASCII
+			
+			if(FILE_OBJ.FileExists(ini)) {
+				var fo = FILE_OBJ.OpenTextFile( ini, FORREADING, true, TRISTATE_FALSE );
+				if(fo === null) return;
+				var contents = fo.ReadLine();
+				fo.Close();
+				
+				if(contents === null) return;
+				var pos = contents.split(/,/g);
+				var x = pos[0];
+				var y = pos[1];
+				if(x > -1000 && y > -1000)
+					window.moveTo(x, y);
+			}
+		}
+		
+		function writeWindowPos(ini) {
+			var FORWRITING      = 2;
+			var TRISTATE_FALSE  = 0; // ASCII
+			var fo = FILE_OBJ.OpenTextFile( ini, FORWRITING, true, TRISTATE_FALSE );
+			var winleft = window.screenLeft;
+			var wintop  = window.screenTop;
+			var x = winleft - 9;
+			var y = wintop - 36;
+			if(winleft === 0) x = 300;
+			if(wintop === 0) y = 300;
+			fo.WriteLine(x + ',' + y);
+			fo.Close();
+		}
+		
+		var timer;
+		function keyup(e) {
+			timer = setTimeout(function() {
+				var target = document.getElementById("targetwd").value.toLowerCase();
+				var clip = CLIP.getArr();
+				if(target === undefined || target === "") {
+					displayClips(clip);
+					return;
+				}
+				
+				var arr = [];
+				for(var i=0; i<clip.length; i++) {
+					if(clip[i].toLowerCase().indexOf(target) != -1) arr.push(clip[i]);
+				}
+				displayClips(arr);
+			}, 400);
+		}
+		
+		function keydown(e) {
+			clearTimeout(timer);
+		}
+		
+		function chgEng(tbox) {
+			tbox.style.imeMode="inactive";
+		}
+	</script>
+	<style type="text/css">
+		<!--
+		li{ white-space: nowrap; } li a{ display:block;}
+		 -->
+	</style>
+</head>
+<body>
+	<div>
+		<input type="text" id="targetwd" onkeyup="keyup(event)" onkeydown="keydown(event)" onfocus="chgEng(this)" style="width:340px;">
+	</div>
+	<hr>
+	<ul id="clips" style="list-style: none;padding-left: 0;padding-left: 0;">
+	</ul>
+</body>
+</html>
